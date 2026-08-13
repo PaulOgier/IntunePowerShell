@@ -84,6 +84,23 @@ Both parameters are optional:
 
 `-TenantId` pins the run to one tenant, which matters when the signing-in account has access to several and a cached token could send you somewhere else. `-OutputPath` defaults to the tenant name and today's date in the current directory.
 
+### Checking one person
+
+`-User` takes one or more UPNs and checks only those, instead of reading the whole tenant.
+
+```powershell
+.\Get-EntraSmsVoiceMfaExposure.ps1 -User jsmith@contoso.com
+.\Get-EntraSmsVoiceMfaExposure.ps1 -User jsmith@contoso.com, ajones@contoso.com
+```
+
+It prints each account in full rather than a tenant summary, and writes no CSV unless `-OutputPath` is given, so a one-person check cannot land on top of a full export.
+
+Two uses. Re-reading a user whose row came back `UNREAD` after a Graph timeout, without paying for another full pass. And confirming one person is ready before a cutover or a licence change.
+
+Accounts named this way are returned even when they are disabled or guests. A lookup that came back empty because of a filter would be worse than useless.
+
+The tenant-level policy block still prints, since it costs one call and is the context for reading anybody's row.
+
 ### Sign-in dates
 
 `-IncludeSignInActivity` adds a `LastSignIn` column, which lets unlicensed accounts be reported as dormant rather than merely unlicensed.

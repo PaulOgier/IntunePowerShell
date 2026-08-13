@@ -19,7 +19,14 @@
     signing-in account has access to several.
 
 .PARAMETER OutputPath
-    Optional. Defaults to .\<tenantname>-sms-voice-audit-<yyyy-MM-dd>.csv
+    Optional. Defaults to .\<tenantname>-sms-voice-audit-<yyyy-MM-dd>.csv on a
+    tenant-wide run. A -User run writes no CSV unless this is given, so a
+    one-person check cannot overwrite a full export.
+
+.PARAMETER User
+    One or more UPNs to check instead of the whole tenant. Prints each account in
+    full rather than a tenant summary. Named accounts are returned even if they
+    are disabled or guests, so a lookup never silently comes back empty.
 
 .PARAMETER IncludeSignInActivity
     Adds a LastSignIn column. Needs Entra ID P1 in the target tenant and requests
@@ -44,6 +51,12 @@
 param(
     [string]$TenantId,
     [string]$OutputPath,
+
+    # One or more UPNs to check instead of the whole tenant. Use it to re-check a
+    # user whose row came back UNREAD, or to confirm one person before a cutover,
+    # without re-reading every account. Disabled users and guests are returned
+    # when named explicitly; the tenant-wide run still skips them.
+    [string[]]$User,
 
     # Adds a LastSignIn column so dormant accounts can be named rather than just
     # flagged as unlicensed. Off by default: it needs Entra ID P1 AND a broader
@@ -128,7 +141,9 @@ try   { $tenantName = (Get-MgOrganization -ErrorAction Stop)[0].DisplayName } ca
 if ([string]::IsNullOrWhiteSpace($tenantName)) { $tenantName = $ctx.TenantId }
 Write-Host "Tenant: $tenantName ($($ctx.TenantId))" -ForegroundColor Cyan
 
-if (-not $OutputPath) {
+# A -User run writes a CSV only when one is asked for by name. Auto-naming it
+# would drop a two-row file on top of the full tenant export.
+if (-not $OutputPath -and -not $User) {
     $safe = ($tenantName -replace '[^\w\-]', '-')
     $OutputPath = Join-Path (Get-Location) "$safe-sms-voice-audit-$(Get-Date -Format 'yyyy-MM-dd').csv"
 }
@@ -185,24 +200,48 @@ $props = @('Id', 'UserPrincipalName', 'DisplayName', 'AccountEnabled', 'UserType
 # as non-terminating errors that $ErrorActionPreference does not catch, so without
 # it a 403 prints in red and the script sails on with zero users.
 $haveSignIn = $false
-if ($IncludeSignInActivity) {
-    try {
-        $users = Get-MgUser -All -Filter "accountEnabled eq true" `
-                            -Property ($props + 'SignInActivity') -ErrorAction Stop
-        $haveSignIn = $true
-    } catch {
-        Write-Host "signInActivity unavailable: $($_.Exception.Message.Split([char]10)[0])" -ForegroundColor Yellow
-        Write-Host "Continuing without it - LastSignIn will be blank." -ForegroundColor Yellow
+$wanted = if ($IncludeSignInActivity) { $props + 'SignInActivity' } else { $props }
+
+if ($User) {
+    # Named users are fetched one at a time and returned as asked for, including
+    # disabled accounts and guests. Filtering those out here would silently
+    # return nothing for exactly the account someone is trying to look up.
+    $users = foreach ($upn in $User) {
+        try {
+            Get-MgUser -UserId $upn -Property $wanted -ErrorAction Stop
+            if ($IncludeSignInActivity) { $haveSignIn = $true }
+        } catch {
+            try {
+                Get-MgUser -UserId $upn -Property $props -ErrorAction Stop
+            } catch {
+                Write-Host "Could not read ${upn}: $($_.Exception.Message.Split([char]10)[0])" -ForegroundColor Red
+            }
+        }
     }
-}
-if (-not $haveSignIn) {
-    $users = Get-MgUser -All -Filter "accountEnabled eq true" -Property $props -ErrorAction Stop
+} else {
+    if ($IncludeSignInActivity) {
+        try {
+            $users = Get-MgUser -All -Filter "accountEnabled eq true" `
+                                -Property $wanted -ErrorAction Stop
+            $haveSignIn = $true
+        } catch {
+            Write-Host "signInActivity unavailable: $($_.Exception.Message.Split([char]10)[0])" -ForegroundColor Yellow
+            Write-Host "Continuing without it - LastSignIn will be blank." -ForegroundColor Yellow
+        }
+    }
+    if (-not $haveSignIn) {
+        $users = Get-MgUser -All -Filter "accountEnabled eq true" -Property $props -ErrorAction Stop
+    }
+    # Guests are excluded in code, not in the filter: a synced account can have a
+    # null userType, and "userType eq 'Member'" would drop it without saying so.
+    $users = $users | Where-Object { $_.UserType -ne 'Guest' }
 }
 
-$users = $users | Where-Object { $_.UserType -ne 'Guest' } | Sort-Object UserPrincipalName
+$users = $users | Sort-Object UserPrincipalName
 
 $users = @($users)
-Write-Host "Enabled member accounts: $($users.Count)`n"
+if ($User) { Write-Host "Accounts requested: $($users.Count) of $($User.Count)`n" }
+else       { Write-Host "Enabled member accounts: $($users.Count)`n" }
 
 $done = 0
 $rows = foreach ($u in $users) {
@@ -309,7 +348,33 @@ if (-not $rows.Count) {
     Write-Host "`nNo users returned - nothing written. Previous CSV left alone." -ForegroundColor Red
     exit 1
 }
-$rows | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+if ($OutputPath) { $rows | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8 }
+
+# --- One or a few named users: print them, skip the tenant statistics ------------
+# Counting "1 of 1 enabled members" tells nobody anything. Show the account.
+if ($User) {
+    foreach ($r in $rows) {
+        Write-Host ("`n===== {0} =====" -f $r.UserPrincipalName) -ForegroundColor Cyan
+        Write-Host ("  Name              : {0}" -f $r.DisplayName)
+        Write-Host ("  Directory role    : {0}" -f $(if ($r.IsAdmin) { 'YES' } else { 'no' }))
+        Write-Host ("  Licensed          : {0}" -f $(if ($r.Licensed) { 'yes' } else { 'NO' }))
+        if ($r.LastSignIn)   { Write-Host ("  Last sign-in      : {0}" -f $r.LastSignIn) }
+        if ($r.PhoneTypes)   { Write-Host ("  Phone             : {0}  ({1})" -f $r.PhoneNumbers, $r.PhoneTypes) }
+        Write-Host ("  Surviving methods : {0}" -f $(if ($r.SurvivingMethods) { $r.SurvivingMethods } else { 'NONE' }))
+        if ($r.OtherMethods)  { Write-Host ("  Other             : {0}" -f $r.OtherMethods) }
+
+        $colour = switch -Wildcard ($r.Verdict) {
+            'BLOCKED*' { 'Red';    break }
+            'UNREAD'   { 'Yellow'; break }
+            'No MFA*'  { 'Yellow'; break }
+            default    { 'Green' }
+        }
+        Write-Host ("  Verdict           : {0}" -f $r.Verdict) -ForegroundColor $colour
+        if ($r.Housekeeping) { Write-Host ("  Housekeeping      : {0}" -f $r.Housekeeping) -ForegroundColor Yellow }
+    }
+    if ($OutputPath) { Write-Host "`nCSV: $OutputPath" }
+    return
+}
 
 # --- Summary --------------------------------------------------------------------
 $blocked      = @($rows | Where-Object { $_.Verdict -like 'BLOCKED*' })
@@ -327,7 +392,7 @@ Write-Host ("No MFA method registered at all         : {0}" -f $noMfa.Count)
 if ($unread.Count) {
     Write-Host ("COULD NOT READ (permissions?)           : {0}" -f $unread.Count) -ForegroundColor Yellow
 }
-Write-Host ("`nCSV: $OutputPath")
+if ($OutputPath) { Write-Host ("`nCSV: $OutputPath") }
 
 if ($blockedAdmin.Count) {
     Write-Host "`nAdmins with no surviving factor:" -ForegroundColor Red
