@@ -66,6 +66,8 @@ Four Microsoft Graph modules are needed. The script checks for them and offers t
 - Microsoft.Graph.Identity.SignIns
 - Microsoft.Graph.Identity.DirectoryManagement
 
+If they are missing it lists them and asks before installing anything. Answering no prints the `Install-Module` line and exits. `-InstallMissingModules` skips the question for unattended runs, where the prompt would hang instead. TLS 1.2 and the NuGet provider are set first, which Windows PowerShell 5.1 needs and 7.x ignores.
+
 Sign in as Global Reader or Global Administrator. The delegated scopes requested are `User.Read.All`, `UserAuthenticationMethod.Read.All`, `Policy.Read.All`, `RoleManagement.Read.Directory` and `Organization.Read.All`, all read-only. First run shows a consent screen for the Microsoft Graph Command Line Tools application, which needs a Global Administrator to approve.
 
 ## Running it
@@ -82,7 +84,16 @@ Both parameters are optional:
     -OutputPath "$HOME/Desktop/contoso-mfa-audit.csv"
 ```
 
-`-TenantId` pins the run to one tenant, which matters when the signing-in account has access to several and a cached token could send you somewhere else. `-OutputPath` defaults to the tenant name and today's date in the current directory.
+`-OutputPath` defaults to the tenant name and today's date in the current directory.
+
+`-TenantId` does more than pick a tenant. Given a GUID, the script compares it against the tenant it actually signed in to and exits if they differ, printing both. Running this across a dozen tenants in one sitting, a cached token that drops you in the wrong one produces output that looks completely normal, and the mistake surfaces later as one organisation's user list in another organisation's report. Pass the GUID every time, and run `Disconnect-MgGraph` between tenants:
+
+```powershell
+Disconnect-MgGraph
+.\Get-EntraSmsVoiceMfaExposure.ps1 -TenantId 00000000-1111-2222-3333-444444444444 -OutputPath .\contoso.csv
+```
+
+A domain rather than a GUID skips the comparison, since the connected context reports a GUID and there is nothing to compare against.
 
 ### Checking one person
 
