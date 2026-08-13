@@ -120,6 +120,20 @@ The tenant-level policy block still prints, since it costs one call and is the c
 
 It is off by default for two reasons. It needs Microsoft Entra ID P1 in the target tenant, so an Office 365-only tenant returns nothing useful. And it requires `AuditLog.Read.All`, a broader consent than the rest of the script asks for. Neither is worth requesting in a tenant that cannot use the result.
 
+### Being asked to sign in twice
+
+Two different things can each produce a second prompt, and they are worth telling apart.
+
+A screen listing the requested permissions with an Accept button is **consent**, not a second sign-in. Every tenant is a first-ever connection for the Microsoft Graph Command Line Tools application, so that tenant's Global Administrator has to approve the scopes once. It does not recur.
+
+A screen asking for credentials again is **Web Account Manager**. Graph SDK 2.34 made WAM the default on Windows and removed the ability to disable it, so the native Windows account picker appears and a browser sign-in can follow it. `-UseDeviceCode` sidesteps that with a single flow:
+
+```powershell
+.\Get-EntraSmsVoiceMfaExposure.ps1 -TenantId contoso.com -UseDeviceCode
+```
+
+Check which SDK you have with `(Get-Module Microsoft.Graph.Authentication -ListAvailable | Select-Object -First 1).Version`.
+
 ### Unattended runs
 
 `-InstallMissingModules` installs missing modules without the confirmation prompt, which would otherwise hang a scheduled run.

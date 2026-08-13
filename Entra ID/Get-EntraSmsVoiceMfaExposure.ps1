@@ -34,6 +34,15 @@
     403 and nothing else. Without it, dormancy cannot be measured and unlicensed
     accounts are flagged for review rather than named as dead.
 
+.PARAMETER UseDeviceCode
+    Sign in with a device code rather than the default Windows flow. Graph SDK
+    2.34 made Web Account Manager the default and removed the ability to turn it
+    off, so on Windows the native account picker appears and then a browser does
+    too, which looks like two sign-ins. This makes it one.
+
+    Note that the separate consent screen on a tenant's first-ever connection is
+    not the same thing and will still appear once per tenant.
+
 .PARAMETER InstallMissingModules
     Install any missing Microsoft Graph modules without asking first. Only needed
     for unattended runs, where the confirmation prompt would hang.
@@ -66,7 +75,13 @@ param(
 
     # Install any missing Graph modules without asking. For unattended runs, where
     # the confirmation prompt would just hang.
-    [switch]$InstallMissingModules
+    [switch]$InstallMissingModules,
+
+    # Sign in with a device code instead of the default Windows flow. Graph SDK
+    # 2.34 forced Web Account Manager on and it can no longer be disabled, so on
+    # Windows the native account picker fires first and a browser follows, which
+    # reads as being asked to sign in twice. A device code is one flow.
+    [switch]$UseDeviceCode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -118,7 +133,8 @@ if ($IncludeSignInActivity) { $scopes += 'AuditLog.Read.All' }
 # -NoWelcome only exists in the Graph SDK v2 Connect-MgGraph; drop it on v1 rather
 # than failing on an unknown parameter.
 $connect = @{ Scopes = $scopes }
-if ($TenantId) { $connect.TenantId = $TenantId }
+if ($TenantId)        { $connect.TenantId = $TenantId }
+if ($UseDeviceCode)   { $connect.UseDeviceCode = $true }
 if ((Get-Command Connect-MgGraph).Parameters.ContainsKey('NoWelcome')) { $connect.NoWelcome = $true }
 Connect-MgGraph @connect
 
