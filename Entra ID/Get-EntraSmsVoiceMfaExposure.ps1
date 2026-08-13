@@ -315,6 +315,8 @@ $rows = foreach ($u in $users) {
 
     $housekeeping =
         if ($isLicensed)                              { '' }
+        elseif ($isAdmin -and $strong.Count -eq 0 -and $phoneTypes.Count -eq 0) {
+                                                        'ADMIN WITH NO MFA - a password is the only control' }
         elseif ($isAdmin)                             { 'Unlicensed admin account - expected, leave alone' }
         elseif ($null -ne $dormantDays -and $dormantDays -ge 90) {
                                                         "BLOCK SIGN-IN - unlicensed, no sign-in for $dormantDays days" }
@@ -380,6 +382,7 @@ if ($User) {
 $blocked      = @($rows | Where-Object { $_.Verdict -like 'BLOCKED*' })
 $blockedAdmin = @($blocked | Where-Object { $_.IsAdmin })
 $noMfa        = @($rows | Where-Object { $_.Verdict -eq 'No MFA method registered at all' })
+$adminNoMfa   = @($rows | Where-Object { $_.IsAdmin -and $_.Verdict -eq 'No MFA method registered at all' })
 $unread       = @($rows | Where-Object { $_.Verdict -eq 'UNREAD' })
 $phoneAny     = @($rows | Where-Object { $_.PhoneTypes })
 
@@ -389,14 +392,21 @@ Write-Host ("Have a phone number registered          : {0}" -f $phoneAny.Count)
 Write-Host ("LOCKED OUT on 1 Feb 2027 (phone only)   : {0}" -f $blocked.Count) -ForegroundColor Yellow
 Write-Host ("  ...of those, directory-role holders   : {0}" -f $blockedAdmin.Count) -ForegroundColor Red
 Write-Host ("No MFA method registered at all         : {0}" -f $noMfa.Count)
+if ($adminNoMfa.Count) {
+    Write-Host ("  ...of those, DIRECTORY-ROLE HOLDERS    : {0}" -f $adminNoMfa.Count) -ForegroundColor Red
+}
 if ($unread.Count) {
     Write-Host ("COULD NOT READ (permissions?)           : {0}" -f $unread.Count) -ForegroundColor Yellow
 }
 if ($OutputPath) { Write-Host ("`nCSV: $OutputPath") }
 
 if ($blockedAdmin.Count) {
-    Write-Host "`nAdmins with no surviving factor:" -ForegroundColor Red
+    Write-Host "`nAdmins whose only factor is a phone:" -ForegroundColor Red
     $blockedAdmin | ForEach-Object { Write-Host "  $($_.UserPrincipalName)" }
+}
+if ($adminNoMfa.Count) {
+    Write-Host "`nAdmins with NO second factor at all:" -ForegroundColor Red
+    $adminNoMfa | ForEach-Object { Write-Host "  $($_.UserPrincipalName)" }
 }
 
 # --- Housekeeping ---------------------------------------------------------------
