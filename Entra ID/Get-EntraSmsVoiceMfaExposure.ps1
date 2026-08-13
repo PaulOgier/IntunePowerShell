@@ -110,6 +110,18 @@ if ((Get-Command Connect-MgGraph).Parameters.ContainsKey('NoWelcome')) { $connec
 Connect-MgGraph @connect
 
 $ctx = Get-MgContext
+
+# Running this across many client tenants in one sitting, a cached token that
+# lands you in the wrong tenant produces output that looks entirely normal. If
+# -TenantId was given as a GUID, refuse to continue unless it matches.
+if ($TenantId -match '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$' -and
+    $ctx.TenantId -ne $TenantId) {
+    Write-Host "WRONG TENANT." -ForegroundColor Red
+    Write-Host "  asked for : $TenantId"
+    Write-Host "  signed in : $($ctx.TenantId)  as $($ctx.Account)"
+    Write-Host "`nRun Disconnect-MgGraph and try again." -ForegroundColor Yellow
+    exit 1
+}
 # GET /organization is least-privileged at User.Read, but a restricted role or a
 # tenant that hides it should not kill the whole run - the tenant ID is enough.
 try   { $tenantName = (Get-MgOrganization -ErrorAction Stop)[0].DisplayName } catch { }
