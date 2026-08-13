@@ -30,7 +30,9 @@ For every enabled member account, a row giving the registered authentication met
 - **No MFA method registered at all.** A separate problem, surfaced for free.
 - **Clear.** Nothing to do.
 
-Directory-role holders are flagged separately, and that count prints in red on its own line. An administrator whose only factor is SMS takes the whole tenant down with them.
+Directory-role holders are flagged separately on two red lines, each naming the accounts rather than only counting them: administrators whose only factor is a phone, and administrators with no second factor at all.
+
+The second line exists because the first one missed a real case in a live tenant. An administrator holding a directory role with nothing registered at all is not "blocked in February", so it fell through the phone-only count, and the only thing describing the account was a housekeeping label reading "unlicensed admin account, expected, leave alone". Correct about the licence, wrong about everything else.
 
 Output goes to a CSV and a console summary.
 
